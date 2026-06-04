@@ -34456,3 +34456,162 @@ body.theme-frosted .modal {
   background-color: color-mix(in srgb, var(--accent, var(--red)) 10%, transparent);
   transform: translateX(1px);
 }
+
+/* ===========================================================================
+   GTD / Tasks sub-mode (TaskForge-style) — lives inside the Notes panel.
+   =========================================================================== */
+.notes-mode-seg {
+  display: inline-flex;
+  gap: 2px;
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+  border-radius: 9px;
+  padding: 2px;
+  margin-left: 4px;
+}
+.notes-mode-btn {
+  background: transparent;
+  border: none;
+  color: color-mix(in srgb, var(--fg) 55%, transparent);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 11px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.notes-mode-btn:hover { color: var(--fg); }
+.notes-mode-btn.active {
+  background: var(--panel, var(--bg));
+  color: var(--accent);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.18);
+}
+
+/* Toolbar -------------------------------------------------------------- */
+.gtd-toolbar { padding: 6px 2px 10px; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+.gtd-views-bar { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
+.gtd-view-count {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 15px; height: 15px; padding: 0 4px; border-radius: 7px;
+  background: color-mix(in srgb, var(--fg) 12%, transparent);
+  font-size: 9px; font-weight: 700; margin-left: 2px;
+}
+.gtd-toolbar-row { display: flex; align-items: center; gap: 6px; }
+.gtd-layout-seg { display: inline-flex; gap: 2px; background: color-mix(in srgb, var(--fg) 6%, transparent); border-radius: 8px; padding: 2px; }
+.gtd-layout-btn {
+  background: transparent; border: none; color: color-mix(in srgb, var(--fg) 55%, transparent);
+  font-family: inherit; font-size: 10px; font-weight: 600; padding: 3px 9px; border-radius: 6px; cursor: pointer;
+}
+.gtd-layout-btn.active { background: var(--panel, var(--bg)); color: var(--accent); }
+.gtd-edit-view, .gtd-add-task {
+  background: transparent; border: 1px solid var(--border); color: color-mix(in srgb, var(--fg) 70%, transparent);
+  font-family: inherit; font-size: 10px; font-weight: 600; padding: 4px 10px; border-radius: 8px; cursor: pointer;
+}
+.gtd-add-task { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.gtd-edit-view:hover, .gtd-add-task:hover { border-color: var(--accent); }
+.gtd-qf-bar { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+.gtd-qf {
+  background: transparent; border: 1px solid var(--border); color: color-mix(in srgb, var(--fg) 55%, transparent);
+  font-family: inherit; font-size: 10px; padding: 2px 9px; border-radius: 10px; cursor: pointer;
+}
+.gtd-qf.active { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); border-color: color-mix(in srgb, var(--accent) 55%, transparent); font-weight: 600; }
+
+/* Task cards ----------------------------------------------------------- */
+.gtd-list { display: flex; flex-direction: column; gap: 8px; }
+.gtd-task-card {
+  background: var(--panel, var(--bg)); border: 1px solid var(--border);
+  border-radius: 10px; padding: 11px 13px; cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s;
+}
+.gtd-task-card:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
+.gtd-task-card.gtd-dragging { opacity: 0.5; }
+.gtd-task-top { display: flex; align-items: flex-start; gap: 8px; }
+.gtd-task-title { flex: 1; font-size: 13.5px; font-weight: 600; line-height: 1.35; word-break: break-word; }
+.gtd-status-sel {
+  flex-shrink: 0; background: color-mix(in srgb, var(--fg) 7%, transparent); border: 1px solid var(--border);
+  color: var(--fg); font-family: inherit; font-size: 10px; border-radius: 7px; padding: 2px 4px; cursor: pointer;
+}
+.gtd-task-meta { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; align-items: center; }
+.gtd-ctx { font-size: 10px; padding: 1px 7px; border-radius: 8px; background: color-mix(in srgb, var(--cyan, #22d3ee) 16%, transparent); color: var(--cyan, #22d3ee); border: 1px solid color-mix(in srgb, var(--cyan, #22d3ee) 35%, transparent); }
+.gtd-tag { font-size: 10px; padding: 1px 7px; border-radius: 8px; background: color-mix(in srgb, var(--fg) 9%, transparent); color: color-mix(in srgb, var(--fg) 70%, transparent); }
+.gtd-tag-q1 { background: color-mix(in srgb, #f87171 20%, transparent); color: #f87171; }
+.gtd-tag-q2 { background: color-mix(in srgb, #a78bfa 20%, transparent); color: #a78bfa; }
+.gtd-tag-q3 { background: color-mix(in srgb, #fbbf24 20%, transparent); color: #fbbf24; }
+.gtd-tag-q4 { background: color-mix(in srgb, var(--fg) 12%, transparent); color: color-mix(in srgb, var(--fg) 55%, transparent); }
+.gtd-project { font-size: 10px; padding: 1px 7px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
+.gtd-date { font-size: 10px; padding: 1px 6px; border-radius: 8px; background: color-mix(in srgb, var(--fg) 8%, transparent); color: color-mix(in srgb, var(--fg) 65%, transparent); }
+.gtd-date-due { background: color-mix(in srgb, var(--amber, #fbbf24) 16%, transparent); color: var(--amber, #fbbf24); }
+.gtd-progress { font-size: 10px; font-weight: 700; color: color-mix(in srgb, var(--fg) 55%, transparent); }
+
+/* Kanban --------------------------------------------------------------- */
+.gtd-kanban { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.gtd-kan-col { background: color-mix(in srgb, var(--fg) 4%, transparent); border: 1px solid var(--border); border-radius: 10px; padding: 8px; min-height: 80px; }
+.gtd-kan-head { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: color-mix(in srgb, var(--fg) 60%, transparent); margin-bottom: 8px; display: flex; align-items: center; gap: 5px; }
+.gtd-kan-body { display: flex; flex-direction: column; gap: 7px; min-height: 40px; border-radius: 8px; }
+.gtd-kan-body.gtd-kan-over { background: color-mix(in srgb, var(--accent) 10%, transparent); outline: 2px dashed color-mix(in srgb, var(--accent) 45%, transparent); }
+
+/* Matrix --------------------------------------------------------------- */
+.gtd-matrix { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.gtd-matrix-cell { border: 1px solid var(--border); border-radius: 10px; padding: 10px; min-height: 90px; }
+.gtd-matrix-q1 { background: color-mix(in srgb, #f87171 8%, transparent); }
+.gtd-matrix-q2 { background: color-mix(in srgb, #a78bfa 8%, transparent); }
+.gtd-matrix-q3 { background: color-mix(in srgb, #fbbf24 8%, transparent); }
+.gtd-matrix-q4 { background: color-mix(in srgb, var(--fg) 4%, transparent); }
+.gtd-matrix-untagged { margin-top: 8px; border: 1px dashed var(--border); border-radius: 10px; padding: 10px; }
+.gtd-matrix-head { display: flex; flex-direction: column; margin-bottom: 8px; }
+.gtd-matrix-q { font-size: 12px; font-weight: 800; }
+.gtd-matrix-sub { font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px; color: color-mix(in srgb, var(--fg) 50%, transparent); }
+.gtd-matrix-body { display: flex; flex-direction: column; gap: 6px; }
+.gtd-matrix-empty { font-size: 11px; color: color-mix(in srgb, var(--fg) 35%, transparent); }
+
+/* Editor + filter builder --------------------------------------------- */
+.gtd-editor, .gtd-fb { display: flex; flex-direction: column; gap: 8px; padding: 2px; }
+.gtd-ed-headrow { display: flex; align-items: center; }
+.gtd-ed-back, .gtd-fb-back { background: transparent; border: none; color: var(--accent); font-family: inherit; font-size: 12px; cursor: pointer; padding: 4px 2px; }
+.gtd-ed-delete, .gtd-fb-delete, .gtd-fb-reset { background: transparent; border: 1px solid color-mix(in srgb, var(--red, #f87171) 40%, var(--border)); color: var(--red, #f87171); font-family: inherit; font-size: 10px; padding: 3px 9px; border-radius: 7px; cursor: pointer; }
+.gtd-fb-reset { color: var(--amber, #fbbf24); border-color: color-mix(in srgb, var(--amber, #fbbf24) 40%, var(--border)); }
+.gtd-ed-title, .gtd-ed-project, .gtd-ed-content, .gtd-fb-name {
+  width: 100%; background: color-mix(in srgb, var(--fg) 5%, transparent); border: 1px solid var(--border);
+  color: var(--fg); font-family: inherit; border-radius: 8px; padding: 8px 10px; font-size: 13px;
+}
+.gtd-ed-content { min-height: 70px; resize: vertical; }
+.gtd-ed-section-label { font-size: 9.5px; text-transform: uppercase; letter-spacing: 1px; color: color-mix(in srgb, var(--fg) 50%, transparent); font-weight: 700; margin-top: 4px; }
+.gtd-ed-status-seg, .gtd-ed-ctx-wrap, .gtd-ed-tagchips { display: flex; flex-wrap: wrap; gap: 5px; }
+.gtd-ed-status, .gtd-ed-ctx, .gtd-ed-tag {
+  background: transparent; border: 1px solid var(--border); color: color-mix(in srgb, var(--fg) 60%, transparent);
+  font-family: inherit; font-size: 11px; padding: 4px 10px; border-radius: 8px; cursor: pointer;
+}
+.gtd-ed-status.active, .gtd-ed-ctx.active, .gtd-ed-tag.active {
+  background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); border-color: color-mix(in srgb, var(--accent) 55%, transparent); font-weight: 600;
+}
+.gtd-ed-taggroup { margin-bottom: 7px; }
+.gtd-ed-taglabel { font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px; color: color-mix(in srgb, var(--fg) 40%, transparent); margin-bottom: 3px; }
+.gtd-ed-dates { display: flex; flex-wrap: wrap; gap: 8px; }
+.gtd-ed-dates label { display: flex; flex-direction: column; font-size: 10px; color: color-mix(in srgb, var(--fg) 55%, transparent); gap: 3px; }
+.gtd-ed-dates input { background: color-mix(in srgb, var(--fg) 5%, transparent); border: 1px solid var(--border); color: var(--fg); font-family: inherit; border-radius: 7px; padding: 4px 6px; }
+.gtd-ed-items { display: flex; flex-direction: column; gap: 5px; }
+.gtd-ed-item { display: flex; align-items: center; gap: 7px; }
+.gtd-ed-item-text { flex: 1; background: color-mix(in srgb, var(--fg) 5%, transparent); border: 1px solid var(--border); color: var(--fg); font-family: inherit; border-radius: 7px; padding: 5px 8px; font-size: 12px; }
+.gtd-ed-additem { align-self: flex-start; background: transparent; border: 1px dashed var(--border); color: color-mix(in srgb, var(--fg) 60%, transparent); font-family: inherit; font-size: 11px; padding: 4px 10px; border-radius: 7px; cursor: pointer; }
+.gtd-ed-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+.gtd-ed-cancel, .gtd-fb-cancel { background: transparent; border: 1px solid var(--border); color: color-mix(in srgb, var(--fg) 65%, transparent); font-family: inherit; font-size: 12px; padding: 7px 16px; border-radius: 8px; cursor: pointer; }
+.gtd-ed-save, .gtd-fb-save { background: var(--accent); border: 1px solid var(--accent); color: #fff; font-family: inherit; font-size: 12px; font-weight: 600; padding: 7px 18px; border-radius: 8px; cursor: pointer; }
+.gtd-fb-row { display: flex; align-items: center; gap: 5px; margin-bottom: 6px; }
+.gtd-fb-field, .gtd-fb-op, .gtd-fb-value, .gtd-fb-logic, .gtd-fb-sort { background: color-mix(in srgb, var(--fg) 5%, transparent); border: 1px solid var(--border); color: var(--fg); font-family: inherit; font-size: 11px; border-radius: 7px; padding: 5px 7px; }
+.gtd-fb-field { flex: 1; }
+.gtd-fb-op { flex: 1; }
+.gtd-fb-valuewrap { flex: 1; display: flex; }
+.gtd-fb-valuewrap .gtd-fb-value { width: 100%; }
+.gtd-fb-novalue { color: color-mix(in srgb, var(--fg) 35%, transparent); padding: 5px; }
+.gtd-fb-del { background: transparent; border: none; color: color-mix(in srgb, var(--fg) 45%, transparent); font-size: 13px; cursor: pointer; padding: 2px 6px; }
+.gtd-fb-del:hover { color: var(--red, #f87171); }
+.gtd-fb-add { align-self: flex-start; background: transparent; border: 1px dashed var(--border); color: color-mix(in srgb, var(--fg) 60%, transparent); font-family: inherit; font-size: 11px; padding: 5px 11px; border-radius: 7px; cursor: pointer; }
+.gtd-fb-nested { font-size: 10px; color: color-mix(in srgb, var(--fg) 45%, transparent); font-style: italic; margin: 2px 0 6px; }
+
+@media (max-width: 600px) {
+  .gtd-kanban { grid-template-columns: 1fr; }
+  .gtd-matrix { grid-template-columns: 1fr; }
+}
+
+/* In Tasks mode, hide Notes-only bulk-select affordance (search stays useful). */
+.notes-pane.notes-gtd-mode #notes-select-btn,
+.notes-pane.notes-gtd-mode #notes-bulk-bar { display: none !important; }

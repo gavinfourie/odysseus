@@ -10,6 +10,7 @@ import { attachColorPicker } from './colorPicker.js';
 import { makeWindowDraggable } from './windowDrag.js';
 import { snapModalToZone } from './tileManager.js';
 import { applyEdgeDock, clearDockSide } from './modalSnap.js';
+import * as Gtd from './gtdFilters.js';
 
 const API_BASE = window.location.origin;
 let _open = false;
@@ -18,6 +19,13 @@ let _editingId = null;
 let _selectedIds = new Set();
 let _activeLabel = null;
 let _activeFilter = null; // null | 'default' | 'reminders' | 'no-reminders'
+// ---- GTD / Tasks sub-mode state ------------------------------------------
+let _gtdMode = false;            // false = Notes view, true = Tasks (GTD) view
+let _gtdActiveViewId = 'inbox';  // selected smart-list / saved view id
+let _gtdQuickFilters = {};       // active quick-filter chip toggles for current view
+let _gtdViews = [];              // saved views (from /api/prefs/gtd_views)
+let _gtdViewsLoaded = false;
+let _gtdLayout = 'list';         // 'list' | 'kanban' | 'matrix'
 // Cycle order for the Reminders chip: each click on it advances reminders →
 // null → no-reminders → null → reminders → ... This var tracks which non-null
 // state the next click should land on after passing through null.
@@ -574,7 +582,7 @@ function _isNoteFullyDone(note) {
 // A "checklist note" — todo or goal — has structured items[] that the cards
 // render as checkboxes and that "fully done" / progress logic reads from.
 function _hasItems(note) {
-  return note && (note.note_type === 'todo' || note.note_type === 'goal');
+  return note && (note.note_type === 'todo' || note.note_type === 'goal' || note.note_type === 'task');
 }
 
 // Compact " N/M" progress string for a goal's checklist. Empty when the goal
@@ -1117,6 +1125,10 @@ export function openPanel() {
     <div class="notes-mobile-grabber" id="notes-mobile-grabber" aria-hidden="true"></div>
     <div class="notes-pane-header">
       <h4 class="notes-pane-title"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2.5px;margin-right:6px"><path d="M5 3h10l4 4v14H5z"/><path d="M15 3v5h5"/><path d="M8 17.5 15.5 10l2.5 2.5L10.5 20H8z"/></svg>Notes</h4>
+      <div class="notes-mode-seg" role="tablist" aria-label="Notes or Tasks">
+        <button type="button" class="notes-mode-btn${!_gtdMode ? ' active' : ''}" data-mode="notes" role="tab">Notes</button>
+        <button type="button" class="notes-mode-btn${_gtdMode ? ' active' : ''}" data-mode="tasks" role="tab">Tasks</button>
+      </div>
       <span style="flex:1"></span>
       <button id="notes-archive-toggle" class="doc-action-icon-btn notes-header-text-btn" title="View archive" style="opacity:0.6;gap:5px;">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 002 2h12a2 2 0 002-2V8"/><path d="M10 12h4"/></svg>
@@ -1206,6 +1218,11 @@ export function openPanel() {
     });
   }
 
+  // Notes / Tasks (GTD) mode toggle
+  pane.querySelectorAll('.notes-mode-btn').forEach(b => {
+    b.addEventListener('click', () => _setGtdMode(b.dataset.mode === 'tasks'));
+  });
+
   // View toggle
   const archiveBtn = document.getElementById('notes-archive-toggle');
   if (archiveBtn) {
@@ -1277,7 +1294,7 @@ export function openPanel() {
     }
   }, true);
   document.getElementById('notes-select-all').addEventListener('change', (e) => {
-    if (e.target.checked) _notes.forEach(n => _selectedIds.add(n.id));
+    if (e.target.checked) _notes.filter(n => n.note_type !== 'task').forEach(n => _selectedIds.add(n.id));
     else _selectedIds.clear();
     _renderNotes();
     _updateBulkBar();
@@ -1418,7 +1435,7 @@ function _updateBulkBar() {
   if (countEl) countEl.textContent = `${count} Selected`;
   if (archiveBtn) archiveBtn.disabled = count === 0;
   if (deleteBtn) deleteBtn.disabled = count === 0;
-  if (allEl) allEl.checked = _notes.length > 0 && _notes.every(n => _selectedIds.has(n.id));
+  if (allEl) { const _nn = _notes.filter(n => n.note_type !== 'task'); allEl.checked = _nn.length > 0 && _nn.every(n => _selectedIds.has(n.id)); }
   // Toggle select-mode class so todo dots don't react to hover
   const pane = document.getElementById('notes-pane');
   if (pane) pane.classList.toggle('notes-select-mode', count > 0);
@@ -1626,6 +1643,12 @@ export function togglePanel() {
 
 export function isPanelOpen() { return _open; }
 
+// Open the Notes panel directly into the GTD/Tasks sub-mode.
+export function openTasks() {
+  if (!_open) openPanel();
+  _setGtdMode(true);
+}
+
 // ---- Render ----
 
 // FLIP animation — capture positions before render, animate back after
@@ -1667,13 +1690,18 @@ function _animateReflow(prevPositions) {
 }
 
 function _renderNotes() {
+  // GTD/Tasks sub-mode takes over the panel body entirely.
+  if (_gtdMode) { _renderGtd(); return; }
   _updateRailBadge();
   const body = document.querySelector('#notes-pane .notes-pane-body');
   if (!body) return;
   const prevPositions = _captureCardPositions();
   const activeReminderHighlights = _loadActiveHighlights();
 
-  let filtered = _activeLabel ? _notes.filter(n => _noteTags(n).includes(_activeLabel)) : _notes;
+  // GTD tasks (note_type === 'task') only appear in Tasks mode — keep them
+  // out of the regular Notes list for a clean separation.
+  const _base = _notes.filter(n => n.note_type !== 'task');
+  let filtered = _activeLabel ? _base.filter(n => _noteTags(n).includes(_activeLabel)) : _base;
   if (_activeFilter === 'reminders') {
     filtered = filtered.filter(n => n.due_date && _hasTimeComponent(n.due_date));
   } else if (_activeFilter === 'no-reminders') {
@@ -4400,7 +4428,7 @@ function _editNote(id) {
       const ta = form.querySelector('.note-form-content');
       if (ta) { ta.focus(); try { ta.setSelectionRange(ta.value.length, ta.value.length); } catch {} return; }
     }
-    if (note.note_type === 'todo' || note.note_type === 'goal' || note.note_type === 'checklist') {
+    if (note.note_type === 'todo' || note.note_type === 'goal' || note.note_type === 'checklist' || note.note_type === 'task') {
       // Last non-empty checklist row, or the first row if all empty.
       const rows = form.querySelectorAll('.note-cl-row .note-cl-text');
       let target = null;
@@ -4992,6 +5020,595 @@ async function _commitNoteReorder() {
 }
 
 
+// ===========================================================================
+// GTD / Tasks sub-mode — TaskForge-style task manager built on Note rows
+// (note_type === 'task'). See gtdFilters.js for the filter engine + taxonomy.
+// ===========================================================================
+
+const GTD_VIEWS_KEY = 'gtd_views';
+
+function _gtdTasks() {
+  return _notes.filter(n => n.note_type === 'task' && !n.archived);
+}
+
+function _gtdActiveView() {
+  return _gtdViews.find(v => v.id === _gtdActiveViewId) || _gtdViews[0] || null;
+}
+
+// Load saved views from the per-user prefs store; seed defaults on first use.
+async function _loadGtdViews() {
+  if (_gtdViewsLoaded) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/prefs/${GTD_VIEWS_KEY}`, { credentials: 'same-origin' });
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data.value) && data.value.length) {
+        _gtdViews = data.value;
+      }
+    }
+  } catch {}
+  if (!_gtdViews.length) {
+    _gtdViews = Gtd.defaultGtdViews();
+    _saveGtdViews();
+  }
+  _gtdViewsLoaded = true;
+}
+
+async function _saveGtdViews() {
+  try {
+    await fetch(`${API_BASE}/api/prefs/${GTD_VIEWS_KEY}`, {
+      method: 'PUT', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ value: _gtdViews }),
+    });
+  } catch (e) { console.warn('gtd views save failed', e); }
+}
+
+async function _setGtdMode(on) {
+  if (_gtdMode === on) return;
+  _gtdMode = on;
+  // Reflect on the header segmented control.
+  document.querySelectorAll('.notes-mode-btn').forEach(b => {
+    b.classList.toggle('active', (b.dataset.mode === 'tasks') === on);
+  });
+  const pane = document.getElementById('notes-pane');
+  if (pane) pane.classList.toggle('notes-gtd-mode', on);
+  if (on) {
+    // Tasks need the full active set; leave the archive sub-view if it's on.
+    if (_showingArchived) {
+      _showingArchived = false;
+      document.getElementById('notes-archive-toggle')?.classList.remove('active');
+      await _fetchNotes();
+    }
+    await _loadGtdViews();
+    const v = _gtdActiveView();
+    _gtdLayout = (v && v.layout) || 'list';
+  }
+  _renderNotes();
+}
+
+// Tasks visible in the active view, after quick-filter chips + search.
+function _gtdVisibleTasks() {
+  const view = _gtdActiveView();
+  let tasks = Gtd.applyView(_gtdTasks(), view);
+  const active = _gtdQuickFilters[_gtdActiveViewId] || {};
+  const qfs = (view && view.quickFilters) || [];
+  const onIds = Object.keys(active).filter(k => active[k]);
+  if (onIds.length) {
+    tasks = tasks.filter(t => onIds.every(id => {
+      const qf = qfs.find(q => q.id === id);
+      return qf ? Gtd.evaluateCondition(t, qf.cond) : true;
+    }));
+  }
+  if (_searchQuery) {
+    const q = _searchQuery;
+    tasks = tasks.filter(t =>
+      (t.title || '').toLowerCase().includes(q) ||
+      (t.content || '').toLowerCase().includes(q) ||
+      (t.label || '').toLowerCase().includes(q) ||
+      (t.project || '').toLowerCase().includes(q)
+    );
+  }
+  return tasks;
+}
+
+function _gtdStatusLabel(code) { return Gtd.STATUS_LABELS[code] || (code ? code : '—'); }
+
+function _renderGtd() {
+  _updateRailBadge();
+  const body = document.querySelector('#notes-pane .notes-pane-body');
+  if (!body) return;
+  const view = _gtdActiveView();
+  if (!view) { body.innerHTML = '<div class="notes-empty">No task views available.</div>'; return; }
+
+  const allTasks = _gtdTasks();
+  const viewsHtml = _gtdViews.map(v =>
+    `<button class="notes-label-chip gtd-view-chip${v.id === _gtdActiveViewId ? ' active' : ''}" data-view="${_esc(v.id)}">${_esc(v.name)} <span class="gtd-view-count">${Gtd.viewCount(allTasks, v)}</span></button>`
+  ).join('');
+
+  const layouts = [['list', 'List'], ['kanban', 'Board'], ['matrix', 'Matrix']];
+  const layoutHtml = layouts.map(([id, lbl]) =>
+    `<button class="gtd-layout-btn${_gtdLayout === id ? ' active' : ''}" data-layout="${id}">${lbl}</button>`
+  ).join('');
+
+  const active = _gtdQuickFilters[_gtdActiveViewId] || {};
+  const qfHtml = ((view.quickFilters) || []).map(qf =>
+    `<button class="gtd-qf${active[qf.id] ? ' active' : ''}" data-qf="${_esc(qf.id)}">${_esc(qf.label)}</button>`
+  ).join('');
+
+  body.innerHTML = `
+    <div class="gtd-toolbar">
+      <div class="gtd-views-bar">
+        ${viewsHtml}
+        <button class="notes-label-chip gtd-new-view" title="Create a custom view">+ View</button>
+      </div>
+      <div class="gtd-toolbar-row">
+        <div class="gtd-layout-seg">${layoutHtml}</div>
+        <span style="flex:1"></span>
+        <button class="gtd-edit-view" title="Edit this view's filters">Filters</button>
+        <button class="gtd-add-task">+ Task</button>
+      </div>
+      ${qfHtml ? `<div class="gtd-qf-bar">${qfHtml}</div>` : ''}
+    </div>
+    <div class="gtd-content"></div>
+  `;
+
+  const content = body.querySelector('.gtd-content');
+  const tasks = _gtdVisibleTasks();
+  if (_gtdLayout === 'matrix') _renderGtdMatrix(content, tasks);
+  else if (_gtdLayout === 'kanban') _renderGtdKanban(content, tasks);
+  else _renderGtdList(content, tasks);
+
+  _bindGtdEvents(body);
+}
+
+function _gtdTagChips(note) {
+  const tags = (note.label || '').trim().split(/\s+/).filter(Boolean);
+  return tags.map(t => {
+    const norm = t.replace(/^#/, '').toLowerCase();
+    const isQ = /^q[1-4]$/.test(norm);
+    return `<span class="gtd-tag${isQ ? ' gtd-tag-' + norm : ''}">${_esc(t.startsWith('#') ? t : '#' + t)}</span>`;
+  }).join('');
+}
+
+function _gtdCtxChips(note) {
+  const ctx = (note.contexts || '').trim().split(/\s+/).filter(Boolean);
+  return ctx.map(cx => `<span class="gtd-ctx">${_esc(cx)}</span>`).join('');
+}
+
+function _gtdDateBadges(note) {
+  const out = [];
+  if (note.due_date) out.push(`<span class="gtd-date gtd-date-due" title="Due">⏰ ${_esc(_formatDueDate(note.due_date) || note.due_date)}</span>`);
+  if (note.scheduled_date) out.push(`<span class="gtd-date" title="Scheduled">📅 ${_esc(_formatDueDate(note.scheduled_date) || note.scheduled_date)}</span>`);
+  if (note.happens_date) out.push(`<span class="gtd-date" title="Happens">▶ ${_esc(_formatDueDate(note.happens_date) || note.happens_date)}</span>`);
+  return out.join('');
+}
+
+function _gtdProgress(note) {
+  if (!Array.isArray(note.items) || !note.items.length) return '';
+  const done = note.items.filter(it => it.done).length;
+  return `<span class="gtd-progress">${done}/${note.items.length}</span>`;
+}
+
+function _renderGtdTaskCard(note) {
+  const statusSel = Gtd.STATUSES.map(s =>
+    `<option value="${s.code}"${(note.gtd_status || '') === s.code ? ' selected' : ''}>${_esc(s.label)}</option>`
+  ).join('');
+  const proj = note.project ? `<span class="gtd-project">🗂 ${_esc(note.project)}</span>` : '';
+  const meta = [_gtdCtxChips(note), _gtdProgress(note), _gtdDateBadges(note), proj, _gtdTagChips(note)].filter(Boolean).join('');
+  return `
+    <div class="gtd-task-card" data-id="${_esc(note.id)}" draggable="true">
+      <div class="gtd-task-top">
+        <div class="gtd-task-title">${_esc(note.title || '(untitled task)')}</div>
+        <select class="gtd-status-sel" data-id="${_esc(note.id)}" title="Status">${statusSel}</select>
+      </div>
+      ${meta ? `<div class="gtd-task-meta">${meta}</div>` : ''}
+    </div>
+  `;
+}
+
+function _renderGtdList(content, tasks) {
+  if (!tasks.length) {
+    content.innerHTML = `<div class="notes-empty">Nothing here. Add a task or switch views.</div>`;
+    return;
+  }
+  content.innerHTML = `<div class="gtd-list">${tasks.map(_renderGtdTaskCard).join('')}</div>`;
+}
+
+function _renderGtdKanban(content, tasks) {
+  // Columns by status, like the @Desk board. (View already filters out
+  // done/someday for the board, but we keep a Done column for general use.)
+  const cols = [
+    { code: 'todo', label: 'To Do' },
+    { code: 'blocked', label: 'Blocked' },
+    { code: 'done', label: 'Done' },
+  ];
+  content.innerHTML = `<div class="gtd-kanban">` + cols.map(col => {
+    const items = tasks.filter(t => (t.gtd_status || 'todo') === col.code);
+    return `
+      <div class="gtd-kan-col" data-status="${col.code}">
+        <div class="gtd-kan-head">${_esc(col.label)} <span class="gtd-view-count">${items.length}</span></div>
+        <div class="gtd-kan-body" data-status="${col.code}">${items.map(_renderGtdTaskCard).join('')}</div>
+      </div>`;
+  }).join('') + `</div>`;
+}
+
+function _renderGtdMatrix(content, tasks) {
+  const quads = [
+    { q: 'q1', label: 'Q1 · Do Now', sub: 'Urgent + Important' },
+    { q: 'q2', label: 'Q2 · Schedule', sub: 'Important · Not Urgent' },
+    { q: 'q3', label: 'Q3 · Delegate', sub: 'Urgent · Not Important' },
+    { q: 'q4', label: 'Q4 · Eliminate', sub: 'Neither' },
+  ];
+  const untag = tasks.filter(t => !Gtd.matrixBucket(t));
+  content.innerHTML = `<div class="gtd-matrix">` + quads.map(qd => {
+    const items = tasks.filter(t => Gtd.matrixBucket(t) === qd.q);
+    return `
+      <div class="gtd-matrix-cell gtd-matrix-${qd.q}">
+        <div class="gtd-matrix-head"><span class="gtd-matrix-q">${_esc(qd.label)}</span><span class="gtd-matrix-sub">${_esc(qd.sub)}</span></div>
+        <div class="gtd-matrix-body">${items.map(_renderGtdTaskCard).join('') || '<div class="gtd-matrix-empty">—</div>'}</div>
+      </div>`;
+  }).join('') + `</div>` +
+    (untag.length ? `<div class="gtd-matrix-untagged"><div class="gtd-matrix-head"><span class="gtd-matrix-q">Untriaged</span><span class="gtd-matrix-sub">No #q tag</span></div><div class="gtd-matrix-body">${untag.map(_renderGtdTaskCard).join('')}</div></div>` : '');
+}
+
+function _bindGtdEvents(body) {
+  // View switching
+  body.querySelectorAll('.gtd-view-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      _gtdActiveViewId = chip.dataset.view;
+      const v = _gtdActiveView();
+      _gtdLayout = (v && v.layout) || 'list';
+      _renderGtd();
+    });
+  });
+  body.querySelector('.gtd-new-view')?.addEventListener('click', () => _openGtdFilterBuilder(null));
+  body.querySelector('.gtd-edit-view')?.addEventListener('click', () => _openGtdFilterBuilder(_gtdActiveView()));
+  body.querySelector('.gtd-add-task')?.addEventListener('click', () => _openGtdEditor(null));
+
+  body.querySelectorAll('.gtd-layout-btn').forEach(b => {
+    b.addEventListener('click', () => { _gtdLayout = b.dataset.layout; _renderGtd(); });
+  });
+
+  body.querySelectorAll('.gtd-qf').forEach(b => {
+    b.addEventListener('click', () => {
+      const m = _gtdQuickFilters[_gtdActiveViewId] || (_gtdQuickFilters[_gtdActiveViewId] = {});
+      m[b.dataset.qf] = !m[b.dataset.qf];
+      _renderGtd();
+    });
+  });
+
+  // Status dropdown — routes the task between lists.
+  body.querySelectorAll('.gtd-status-sel').forEach(sel => {
+    sel.addEventListener('click', e => e.stopPropagation());
+    sel.addEventListener('change', async () => {
+      const id = sel.dataset.id;
+      try {
+        await _patchNote(id, { gtd_status: sel.value });
+        const n = _notes.find(x => x.id === id);
+        if (n) n.gtd_status = sel.value;
+        _renderGtd();
+      } catch { uiModule.showToast?.('Failed to update status'); }
+    });
+  });
+
+  // Card click → edit
+  body.querySelectorAll('.gtd-task-card').forEach(card => {
+    card.addEventListener('click', (e) => {
+      if (e.target.closest('.gtd-status-sel')) return;
+      const n = _notes.find(x => x.id === card.dataset.id);
+      if (n) _openGtdEditor(n);
+    });
+  });
+
+  // Kanban drag-and-drop → status change
+  let _dragId = null;
+  body.querySelectorAll('.gtd-task-card').forEach(card => {
+    card.addEventListener('dragstart', () => { _dragId = card.dataset.id; card.classList.add('gtd-dragging'); });
+    card.addEventListener('dragend', () => { _dragId = null; card.classList.remove('gtd-dragging'); });
+  });
+  body.querySelectorAll('.gtd-kan-body').forEach(colBody => {
+    colBody.addEventListener('dragover', e => { e.preventDefault(); colBody.classList.add('gtd-kan-over'); });
+    colBody.addEventListener('dragleave', () => colBody.classList.remove('gtd-kan-over'));
+    colBody.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      colBody.classList.remove('gtd-kan-over');
+      if (!_dragId) return;
+      const status = colBody.dataset.status;
+      try {
+        await _patchNote(_dragId, { gtd_status: status });
+        const n = _notes.find(x => x.id === _dragId);
+        if (n) n.gtd_status = status;
+        _renderGtd();
+      } catch { uiModule.showToast?.('Failed to move task'); }
+    });
+  });
+}
+
+// ---- Task editor ----------------------------------------------------------
+
+function _ymdForInput(v) {
+  if (!v) return '';
+  const m = String(v).match(/^(\d{4}-\d{2}-\d{2})/);
+  return m ? m[1] : '';
+}
+
+function _openGtdEditor(note) {
+  const body = document.querySelector('#notes-pane .notes-pane-body');
+  if (!body) return;
+  const isNew = !note;
+  const n = note || { gtd_status: 'todo' };
+  const tagSet = new Set((n.label || '').trim().split(/\s+/).filter(Boolean).map(t => (t.startsWith('#') ? t : '#' + t)));
+  const ctxSet = new Set((n.contexts || '').trim().split(/\s+/).filter(Boolean));
+
+  const statusSeg = Gtd.STATUSES.map(s =>
+    `<button type="button" class="gtd-ed-status${(n.gtd_status || 'todo') === s.code ? ' active' : ''}" data-code="${s.code}">${_esc(s.label)}</button>`
+  ).join('');
+  const ctxChips = Gtd.CONTEXTS.map(cx =>
+    `<button type="button" class="gtd-ed-ctx${ctxSet.has(cx) ? ' active' : ''}" data-ctx="${_esc(cx)}">${_esc(cx)}</button>`
+  ).join('');
+  const tagGroups = Gtd.TAG_GROUPS.map(g => `
+    <div class="gtd-ed-taggroup">
+      <div class="gtd-ed-taglabel">${_esc(g.name)}</div>
+      <div class="gtd-ed-tagchips">${g.tags.map(t =>
+        `<button type="button" class="gtd-ed-tag${tagSet.has(t) ? ' active' : ''}" data-tag="${_esc(t)}">${_esc(t)}</button>`).join('')}</div>
+    </div>`).join('');
+  const items = Array.isArray(n.items) ? n.items : [];
+  const itemRows = items.map((it, i) =>
+    `<div class="gtd-ed-item"><input type="checkbox" class="gtd-ed-item-done" ${it.done ? 'checked' : ''}><input type="text" class="gtd-ed-item-text" value="${_esc(it.text || '')}" placeholder="Sub-step…"></div>`
+  ).join('');
+
+  body.innerHTML = `
+    <div class="gtd-editor">
+      <div class="gtd-ed-headrow">
+        <button type="button" class="gtd-ed-back">← Back</button>
+        <span style="flex:1"></span>
+        ${isNew ? '' : '<button type="button" class="gtd-ed-delete">Delete</button>'}
+      </div>
+      <input type="text" class="gtd-ed-title note-form-title" placeholder="Task title" value="${_esc(n.title || '')}">
+      <div class="gtd-ed-section-label">Status</div>
+      <div class="gtd-ed-status-seg">${statusSeg}</div>
+      <div class="gtd-ed-section-label">Contexts</div>
+      <div class="gtd-ed-ctx-wrap">${ctxChips}</div>
+      <div class="gtd-ed-section-label">Project</div>
+      <input type="text" class="gtd-ed-project" placeholder="Project (optional)" value="${_esc(n.project || '')}">
+      <div class="gtd-ed-dates">
+        <label>Due<input type="date" class="gtd-ed-due" value="${_ymdForInput(n.due_date)}"></label>
+        <label>Scheduled<input type="date" class="gtd-ed-scheduled" value="${_ymdForInput(n.scheduled_date)}"></label>
+        <label>Happens<input type="date" class="gtd-ed-happens" value="${_ymdForInput(n.happens_date)}"></label>
+      </div>
+      <div class="gtd-ed-section-label">Tags</div>
+      <div class="gtd-ed-tags">${tagGroups}</div>
+      <div class="gtd-ed-section-label">Sub-steps</div>
+      <div class="gtd-ed-items">${itemRows}</div>
+      <button type="button" class="gtd-ed-additem">+ Add step</button>
+      <div class="gtd-ed-section-label">Notes</div>
+      <textarea class="gtd-ed-content note-form-content" placeholder="Details (optional)">${_esc(n.content || '')}</textarea>
+      <div class="gtd-ed-actions">
+        <button type="button" class="gtd-ed-cancel">Cancel</button>
+        <button type="button" class="gtd-ed-save">${isNew ? 'Create task' : 'Save'}</button>
+      </div>
+    </div>
+  `;
+
+  const ed = body.querySelector('.gtd-editor');
+  // Status segment
+  ed.querySelectorAll('.gtd-ed-status').forEach(b => b.addEventListener('click', () => {
+    ed.querySelectorAll('.gtd-ed-status').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+  }));
+  // Toggle chips
+  ed.querySelectorAll('.gtd-ed-ctx').forEach(b => b.addEventListener('click', () => b.classList.toggle('active')));
+  ed.querySelectorAll('.gtd-ed-tag').forEach(b => b.addEventListener('click', () => {
+    // Priority tags are mutually exclusive.
+    if (/^#q[1-4]$/.test(b.dataset.tag) && !b.classList.contains('active')) {
+      ed.querySelectorAll('.gtd-ed-tag').forEach(x => { if (/^#q[1-4]$/.test(x.dataset.tag)) x.classList.remove('active'); });
+    }
+    b.classList.toggle('active');
+  }));
+  ed.querySelector('.gtd-ed-additem')?.addEventListener('click', () => {
+    const wrap = ed.querySelector('.gtd-ed-items');
+    const row = document.createElement('div');
+    row.className = 'gtd-ed-item';
+    row.innerHTML = `<input type="checkbox" class="gtd-ed-item-done"><input type="text" class="gtd-ed-item-text" placeholder="Sub-step…">`;
+    wrap.appendChild(row);
+    row.querySelector('.gtd-ed-item-text').focus();
+  });
+
+  const back = () => _renderGtd();
+  ed.querySelector('.gtd-ed-back')?.addEventListener('click', back);
+  ed.querySelector('.gtd-ed-cancel')?.addEventListener('click', back);
+  ed.querySelector('.gtd-ed-delete')?.addEventListener('click', async () => {
+    const ok = uiModule?.styledConfirm ? await uiModule.styledConfirm('Delete this task?', { confirmText: 'Delete', danger: true }) : confirm('Delete this task?');
+    if (!ok) return;
+    try { await _deleteNoteApi(n.id); _notes = _notes.filter(x => x.id !== n.id); } catch {}
+    _renderGtd();
+  });
+
+  ed.querySelector('.gtd-ed-save')?.addEventListener('click', async () => {
+    const status = ed.querySelector('.gtd-ed-status.active')?.dataset.code || 'todo';
+    const contexts = [...ed.querySelectorAll('.gtd-ed-ctx.active')].map(x => x.dataset.ctx).join(' ');
+    const label = [...ed.querySelectorAll('.gtd-ed-tag.active')].map(x => x.dataset.tag).join(' ');
+    const collectedItems = [...ed.querySelectorAll('.gtd-ed-item')].map(row => ({
+      text: row.querySelector('.gtd-ed-item-text').value.trim(),
+      done: row.querySelector('.gtd-ed-item-done').checked,
+    })).filter(it => it.text);
+    const payload = {
+      note_type: 'task',
+      title: ed.querySelector('.gtd-ed-title').value.trim(),
+      content: ed.querySelector('.gtd-ed-content').value,
+      gtd_status: status,
+      contexts,
+      project: ed.querySelector('.gtd-ed-project').value.trim(),
+      due_date: ed.querySelector('.gtd-ed-due').value || '',
+      scheduled_date: ed.querySelector('.gtd-ed-scheduled').value || '',
+      happens_date: ed.querySelector('.gtd-ed-happens').value || '',
+      label,
+      items: collectedItems,
+    };
+    if (!payload.title) { uiModule.showToast?.('Give the task a title'); return; }
+    try {
+      if (isNew) {
+        const created = await _saveNote(payload);
+        _notes.push(created);
+      } else {
+        const updated = await _saveNote({ ...payload, id: n.id });
+        const idx = _notes.findIndex(x => x.id === n.id);
+        if (idx >= 0) _notes[idx] = updated; else _notes.push(updated);
+      }
+      _renderGtd();
+    } catch { uiModule.showToast?.('Failed to save task'); }
+  });
+
+  ed.querySelector('.gtd-ed-title')?.focus();
+}
+
+// ---- Filter builder -------------------------------------------------------
+
+function _gtdOpOptions(fieldId, selected) {
+  const meta = Gtd.FIELDS[fieldId];
+  const ops = meta ? (Gtd.OPERATORS_BY_TYPE[meta.type] || []) : [];
+  return ops.map(op => `<option value="${op}"${op === selected ? ' selected' : ''}>${_esc(Gtd.OPERATORS[op])}</option>`).join('');
+}
+
+function _gtdValueInput(fieldId, op, value) {
+  const meta = Gtd.FIELDS[fieldId];
+  if (!meta || ['is_empty', 'is_not_empty', 'is_today'].includes(op)) return '<span class="gtd-fb-novalue">—</span>';
+  if (meta.type === 'date') return `<input type="date" class="gtd-fb-value" value="${_esc(_ymdForInput(value))}">`;
+  if (fieldId === 'status') {
+    return `<select class="gtd-fb-value">${Gtd.STATUSES.map(s => `<option value="${s.code}"${s.code === value ? ' selected' : ''}>${_esc(s.label)}</option>`).join('')}</select>`;
+  }
+  if (fieldId === 'contexts') {
+    return `<select class="gtd-fb-value">${Gtd.CONTEXTS.map(cx => `<option value="${_esc(cx)}"${cx === value ? ' selected' : ''}>${_esc(cx)}</option>`).join('')}</select>`;
+  }
+  if (fieldId === 'tags') {
+    return `<select class="gtd-fb-value">${Gtd.ALL_TAGS.map(t => `<option value="${_esc(t)}"${t === value ? ' selected' : ''}>${_esc(t)}</option>`).join('')}</select>`;
+  }
+  return `<input type="text" class="gtd-fb-value" value="${_esc(value || '')}">`;
+}
+
+function _gtdConditionRow(cond) {
+  cond = cond || { field: 'status', op: 'is', value: 'todo' };
+  const fieldOpts = Object.keys(Gtd.FIELDS).map(f => `<option value="${f}"${f === cond.field ? ' selected' : ''}>${_esc(Gtd.FIELDS[f].label)}</option>`).join('');
+  return `
+    <div class="gtd-fb-row">
+      <select class="gtd-fb-field">${fieldOpts}</select>
+      <select class="gtd-fb-op">${_gtdOpOptions(cond.field, cond.op)}</select>
+      <span class="gtd-fb-valuewrap">${_gtdValueInput(cond.field, cond.op, cond.value)}</span>
+      <button type="button" class="gtd-fb-del" title="Remove">✕</button>
+    </div>`;
+}
+
+// Flatten one level of nesting for editing (sub-groups shown read-only note).
+function _openGtdFilterBuilder(view) {
+  const body = document.querySelector('#notes-pane .notes-pane-body');
+  if (!body) return;
+  const isNew = !view;
+  const v = view ? JSON.parse(JSON.stringify(view)) : Gtd.blankView();
+  // Editable flat conditions = top-level non-group conditions. Any nested
+  // sub-groups (e.g. Today's date OR) are preserved but shown as locked.
+  const flat = (v.group.conditions || []).filter(c => !c.logic);
+  const nested = (v.group.conditions || []).filter(c => c.logic);
+
+  const rowsHtml = (flat.length ? flat : [null]).map(_gtdConditionRow).join('');
+  const sortHtml = Object.keys(Gtd.SORTS).map(s => `<option value="${s}"${(v.sort && v.sort.field) === s ? ' selected' : ''}>${_esc(Gtd.SORTS[s])}</option>`).join('');
+
+  body.innerHTML = `
+    <div class="gtd-fb">
+      <div class="gtd-ed-headrow">
+        <button type="button" class="gtd-fb-back">← Back</button>
+        <span style="flex:1"></span>
+        ${(!isNew && !v.builtin) ? '<button type="button" class="gtd-fb-delete">Delete view</button>' : ''}
+        ${(!isNew && v.builtin) ? '<button type="button" class="gtd-fb-reset">Reset to default</button>' : ''}
+      </div>
+      <input type="text" class="gtd-fb-name note-form-title" placeholder="View name" value="${_esc(v.name || '')}">
+      <div class="gtd-ed-section-label">Match
+        <select class="gtd-fb-logic">
+          <option value="AND"${v.group.logic !== 'OR' ? ' selected' : ''}>ALL (AND)</option>
+          <option value="OR"${v.group.logic === 'OR' ? ' selected' : ''}>ANY (OR)</option>
+        </select>
+        of these conditions
+      </div>
+      <div class="gtd-fb-rows">${rowsHtml}</div>
+      ${nested.length ? `<div class="gtd-fb-nested">+ ${nested.length} grouped condition(s) preserved from the default (e.g. the date OR-group).</div>` : ''}
+      <button type="button" class="gtd-fb-add">+ Add condition</button>
+      <div class="gtd-ed-section-label">Sort by</div>
+      <select class="gtd-fb-sort">${sortHtml}</select>
+      <div class="gtd-ed-actions">
+        <button type="button" class="gtd-fb-cancel">Cancel</button>
+        <button type="button" class="gtd-fb-save">${isNew ? 'Create view' : 'Save view'}</button>
+      </div>
+    </div>
+  `;
+
+  const fb = body.querySelector('.gtd-fb');
+  const rebindRow = (row) => {
+    const fieldSel = row.querySelector('.gtd-fb-field');
+    const opSel = row.querySelector('.gtd-fb-op');
+    const valWrap = row.querySelector('.gtd-fb-valuewrap');
+    fieldSel.addEventListener('change', () => {
+      opSel.innerHTML = _gtdOpOptions(fieldSel.value, '');
+      valWrap.innerHTML = _gtdValueInput(fieldSel.value, opSel.value, '');
+    });
+    opSel.addEventListener('change', () => {
+      const valEl = valWrap.querySelector('.gtd-fb-value');
+      valWrap.innerHTML = _gtdValueInput(fieldSel.value, opSel.value, valEl ? valEl.value : '');
+    });
+    row.querySelector('.gtd-fb-del')?.addEventListener('click', () => {
+      if (fb.querySelectorAll('.gtd-fb-row').length > 1) row.remove();
+    });
+  };
+  fb.querySelectorAll('.gtd-fb-row').forEach(rebindRow);
+  fb.querySelector('.gtd-fb-add')?.addEventListener('click', () => {
+    const wrap = fb.querySelector('.gtd-fb-rows');
+    const tmp = document.createElement('div');
+    tmp.innerHTML = _gtdConditionRow(null);
+    const row = tmp.firstElementChild;
+    wrap.appendChild(row);
+    rebindRow(row);
+  });
+
+  const back = () => _renderGtd();
+  fb.querySelector('.gtd-fb-back')?.addEventListener('click', back);
+  fb.querySelector('.gtd-fb-cancel')?.addEventListener('click', back);
+
+  fb.querySelector('.gtd-fb-delete')?.addEventListener('click', async () => {
+    _gtdViews = _gtdViews.filter(x => x.id !== v.id);
+    if (_gtdActiveViewId === v.id) _gtdActiveViewId = _gtdViews[0]?.id || 'inbox';
+    await _saveGtdViews();
+    _renderGtd();
+  });
+  fb.querySelector('.gtd-fb-reset')?.addEventListener('click', async () => {
+    const def = Gtd.defaultGtdViews().find(d => d.id === v.id);
+    if (def) {
+      const idx = _gtdViews.findIndex(x => x.id === v.id);
+      if (idx >= 0) _gtdViews[idx] = def;
+      await _saveGtdViews();
+    }
+    _renderGtd();
+  });
+
+  fb.querySelector('.gtd-fb-save')?.addEventListener('click', async () => {
+    const conditions = [...fb.querySelectorAll('.gtd-fb-row')].map(row => {
+      const field = row.querySelector('.gtd-fb-field').value;
+      const op = row.querySelector('.gtd-fb-op').value;
+      const valEl = row.querySelector('.gtd-fb-value');
+      return { field, op, value: valEl ? valEl.value : '' };
+    });
+    // Preserve any nested sub-groups from the original definition.
+    v.group = { logic: fb.querySelector('.gtd-fb-logic').value, conditions: [...nested, ...conditions] };
+    v.name = fb.querySelector('.gtd-fb-name').value.trim() || 'Untitled view';
+    v.sort = { field: fb.querySelector('.gtd-fb-sort').value };
+    const idx = _gtdViews.findIndex(x => x.id === v.id);
+    if (idx >= 0) _gtdViews[idx] = v; else _gtdViews.push(v);
+    _gtdActiveViewId = v.id;
+    await _saveGtdViews();
+    _renderGtd();
+  });
+
+  fb.querySelector('.gtd-fb-name')?.focus();
+}
+
 // Background reminder loop — runs whether panel is open or not
 async function _initReminders() {
   try {
@@ -5004,7 +5621,7 @@ async function _initReminders() {
   } catch {}
 }
 
-const notesModule = { openPanel, closePanel, togglePanel, isPanelOpen, openNotes: openPanel, closeNotes: closePanel, isNotesOpen: isPanelOpen, refreshDueBadge };
+const notesModule = { openPanel, closePanel, togglePanel, isPanelOpen, openNotes: openPanel, closeNotes: closePanel, isNotesOpen: isPanelOpen, openTasks, refreshDueBadge };
 export default notesModule;
 export { openPanel as openNotes, closePanel as closeNotes, isPanelOpen as isNotesOpen };
 window.notesModule = notesModule;
