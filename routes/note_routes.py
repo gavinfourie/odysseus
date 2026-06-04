@@ -34,6 +34,12 @@ class NoteCreate(BaseModel):
     image_url: Optional[str] = None
     repeat: Optional[str] = "none"
     sort_order: Optional[int] = None
+    # GTD task fields (only meaningful when note_type == "task")
+    gtd_status: Optional[str] = None
+    contexts: Optional[str] = None
+    project: Optional[str] = None
+    scheduled_date: Optional[str] = None
+    happens_date: Optional[str] = None
 
 
 class NoteUpdate(BaseModel):
@@ -50,6 +56,12 @@ class NoteUpdate(BaseModel):
     repeat: Optional[str] = None
     sort_order: Optional[int] = None
     agent_session_id: Optional[str] = None
+    # GTD task fields
+    gtd_status: Optional[str] = None
+    contexts: Optional[str] = None
+    project: Optional[str] = None
+    scheduled_date: Optional[str] = None
+    happens_date: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -90,6 +102,11 @@ def _note_to_dict(note: Note) -> Dict[str, Any]:
         "ai_classification": ai_cls,
         "ai_content_hash": getattr(note, "ai_content_hash", None),
         "agent_session_id": getattr(note, "agent_session_id", None),
+        "gtd_status": getattr(note, "gtd_status", None),
+        "contexts": getattr(note, "contexts", None),
+        "project": getattr(note, "project", None),
+        "scheduled_date": getattr(note, "scheduled_date", None),
+        "happens_date": getattr(note, "happens_date", None),
         "created_at": note.created_at.isoformat() if note.created_at else None,
         "updated_at": note.updated_at.isoformat() if note.updated_at else None,
     }
@@ -517,6 +534,11 @@ def setup_note_routes(task_scheduler=None):
                 image_url=body.image_url,
                 repeat=body.repeat or "none",
                 sort_order=body.sort_order if body.sort_order is not None else 0,
+                gtd_status=body.gtd_status,
+                contexts=body.contexts,
+                project=body.project,
+                scheduled_date=body.scheduled_date,
+                happens_date=body.happens_date,
             )
             db.add(note)
             db.commit()
@@ -583,6 +605,17 @@ def setup_note_routes(task_scheduler=None):
                 note.sort_order = body.sort_order
             if body.agent_session_id is not None:
                 note.agent_session_id = body.agent_session_id
+            # GTD fields — empty string clears (e.g. removing all contexts → Inbox)
+            if body.gtd_status is not None:
+                note.gtd_status = body.gtd_status
+            if body.contexts is not None:
+                note.contexts = body.contexts
+            if body.project is not None:
+                note.project = body.project
+            if body.scheduled_date is not None:
+                note.scheduled_date = body.scheduled_date
+            if body.happens_date is not None:
+                note.happens_date = body.happens_date
 
             db.commit()
             db.refresh(note)

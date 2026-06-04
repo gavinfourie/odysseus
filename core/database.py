@@ -868,6 +868,30 @@ def _migrate_add_notes_sort_order():
     except Exception as e:
         logging.getLogger(__name__).warning(f"notes migration failed: {e}")
 
+def _migrate_add_notes_gtd_columns():
+    """Add GTD task columns to notes if they don't exist. Idempotent."""
+    import sqlite3
+    db_path = DATABASE_URL.replace("sqlite:///", "")
+    if not os.path.exists(db_path):
+        return
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.execute("PRAGMA table_info(notes)")
+        columns = [row[1] for row in cursor.fetchall()]
+        for col, ddl in (
+            ("gtd_status",     "ALTER TABLE notes ADD COLUMN gtd_status TEXT"),
+            ("contexts",       "ALTER TABLE notes ADD COLUMN contexts TEXT"),
+            ("project",        "ALTER TABLE notes ADD COLUMN project TEXT"),
+            ("scheduled_date", "ALTER TABLE notes ADD COLUMN scheduled_date TEXT"),
+            ("happens_date",   "ALTER TABLE notes ADD COLUMN happens_date TEXT"),
+        ):
+            if columns and col not in columns:
+                conn.execute(ddl)
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"notes GTD migration failed: {e}")
+
 def _migrate_add_mode_column():
     """Add mode column to sessions table if it doesn't exist."""
     import sqlite3
@@ -1340,7 +1364,7 @@ class Note(TimestampMixin, Base):
     title      = Column(String, default="")
     content    = Column(Text, nullable=True)
     items      = Column(Text, nullable=True)       # JSON string of [{text, done}]
-    note_type  = Column(String, default="note")     # "note" or "checklist"
+    note_type  = Column(String, default="note")     # "note", "checklist", "todo", "goal", or "task" (GTD)
     color      = Column(String, nullable=True)
     label      = Column(String, nullable=True)
     pinned     = Column(Boolean, default=False)
@@ -1359,6 +1383,16 @@ class Note(TimestampMixin, Base):
     # Chat session spawned by the note's "Agent" button (solve-this-todo).
     # The note shows a clickable tag that opens this session for review.
     agent_session_id  = Column(String, nullable=True)
+    # ---- GTD task fields (only populated when note_type == "task") ----------
+    # A "task" is a Note that participates in the TaskForge-style GTD system.
+    # All columns are nullable so regular notes/todos/goals are unaffected.
+    # The tag taxonomy (#q1..#q4 priority, duration, energy, work-area, etc.)
+    # lives in the existing `label` field; priority is derived from #qN there.
+    gtd_status     = Column(String, nullable=True)   # "todo" | "blocked" | "someday" | "done"
+    contexts       = Column(String, nullable=True)   # space-separated, e.g. "@Desk @Home"; blank = Inbox
+    project        = Column(String, nullable=True)   # project this task belongs to
+    scheduled_date = Column(String, nullable=True)   # ISO string, GTD "Scheduled Date"
+    happens_date   = Column(String, nullable=True)   # ISO string, GTD "Happens Date"
 
 
 class CalendarCal(TimestampMixin, Base):
@@ -1493,6 +1527,7 @@ def init_db():
     _migrate_add_hidden_models_column()
     _migrate_add_cached_models_column()
     _migrate_add_notes_sort_order()
+    _migrate_add_notes_gtd_columns()
     _migrate_add_model_type_column()
     _migrate_add_model_endpoint_owner_column()
     _migrate_add_supports_tools_column()
